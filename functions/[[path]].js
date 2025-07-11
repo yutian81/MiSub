@@ -12,8 +12,8 @@ const defaultSettings = {
   FileName: 'MiSub',
   mytoken: 'auto',
   profileToken: 'profiles',
-  subConverter: 'url.v1.mk',
-  subConfig: 'https://raw.githubusercontent.com/cmliu/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Full.ini',
+  subConverter: 'subapi.dayutian.com', //'url.v1.mk',
+  subConfig: 'https://raw.githubusercontent.com/yutian81/edgetunnel-cmliu/main/clash-config/mini_country_balance_eu.ini',
   prependSubName: true,
   NotifyThresholdDays: 3, 
   NotifyThresholdPercent: 90 
