@@ -6,6 +6,10 @@ const props = defineProps({
   node: {
     type: Object,
     required: true
+  },
+  index: {
+    type: Number,
+    required: true,
   }
 });
 
@@ -60,6 +64,12 @@ const protocolStyle = computed(() => {
     class="group w-full bg-white/50 dark:bg-gray-900/60 backdrop-blur-sm rounded-lg shadow-md ring-1 ring-black/5 p-3 transition-all duration-300 hover:bg-gray-100 dark:hover:bg-gray-800/80 flex items-center gap-4"
     :class="{ 'opacity-50': !node.enabled }"
   >
+    <div class="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-gray-700/50 rounded-full">
+      <span class="text-xs font-semibold text-gray-500 dark:text-gray-300">
+        {{ index }}
+      </span>
+    </div>
+
     <div class="flex-shrink-0 w-20 text-center">
       <div
         class="text-xs font-bold px-2 py-0.5 rounded-full inline-block"

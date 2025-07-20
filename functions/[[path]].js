@@ -792,7 +792,7 @@ async function handleMisubRequest(context) {
             }
         }
     }
-    if (!targetFormat) { targetFormat = 'clash'; }
+    if (!targetFormat) { targetFormat = 'base64'; }
 
     if (!url.searchParams.has('callback_token')) {
         const clientIp = request.headers.get('CF-Connecting-IP') || 'N/A';
@@ -836,7 +836,7 @@ async function handleMisubRequest(context) {
     const subconverterUrl = new URL(`https://${effectiveSubConverter}/sub`);
     subconverterUrl.searchParams.set('target', targetFormat);
     subconverterUrl.searchParams.set('url', callbackUrl);
-    if ((targetFormat === 'clash' || targetFormat === 'loon') && effectiveSubConfig && effectiveSubConfig.trim() !== '') {
+    if ((targetFormat === 'clash' || targetFormat === 'loon' || targetFormat === 'surge') && effectiveSubConfig && effectiveSubConfig.trim() !== '') {
         subconverterUrl.searchParams.set('config', effectiveSubConfig);
     }
     subconverterUrl.searchParams.set('new_name', 'true');

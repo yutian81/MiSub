@@ -97,27 +97,42 @@ export function extractHostAndPort(url) {
 
     try {
         const protocolEndIndex = url.indexOf('://');
-        if (protocolEndIndex === -1) return { host: '', port: '' };
+        if (protocolEndIndex === -1) throw new Error('无效的 URL：缺少协议头');
 
         const protocol = url.substring(0, protocolEndIndex);
-
+        
         const fragmentStartIndex = url.indexOf('#');
         const mainPartEndIndex = fragmentStartIndex === -1 ? url.length : fragmentStartIndex;
-        
         let mainPart = url.substring(protocolEndIndex + 3, mainPartEndIndex);
 
-        if (protocol === 'ss' || protocol === 'ssr') {
-             if (mainPart.indexOf('@') === -1) {
-                try {
-                    mainPart = atob(mainPart);
-                } catch(e) { /* 不是有效的 Base64，按原样处理 */ }
-             }
+        // --- VMess 专用处理 ---
+        if (protocol === 'vmess') {
+            const decodedString = atob(mainPart);
+            const nodeConfig = JSON.parse(decodedString);
+            return { host: nodeConfig.add || '', port: String(nodeConfig.port || '') };
         }
         
+        let decoded = false;
+        // --- SS/SSR Base64 解码处理 ---
+        if ((protocol === 'ss' || protocol === 'ssr') && mainPart.indexOf('@') === -1) {
+            try {
+                mainPart = atob(mainPart);
+                decoded = true;
+            } catch (e) { /* 解码失败则按原文处理 */ }
+        }
+
+        // --- SSR 解码后专门处理 ---
+        if (protocol === 'ssr' && decoded) {
+            const parts = mainPart.split(':');
+            if (parts.length >= 2) {
+                return { host: parts[0], port: parts[1] };
+            }
+        }
+        
+        // --- 通用解析逻辑 (适用于 VLESS, Trojan, SS原文, 解码后的SS等) ---
         const atIndex = mainPart.lastIndexOf('@');
         let serverPart = atIndex !== -1 ? mainPart.substring(atIndex + 1) : mainPart;
 
-        // [关键修改] 先移除查询参数，再移除路径，确保得到纯净的 "host:port" 部分
         const queryIndex = serverPart.indexOf('?');
         if (queryIndex !== -1) {
             serverPart = serverPart.substring(0, queryIndex);
@@ -126,27 +141,35 @@ export function extractHostAndPort(url) {
         if (pathIndex !== -1) {
             serverPart = serverPart.substring(0, pathIndex);
         }
-        
+
         const lastColonIndex = serverPart.lastIndexOf(':');
-        const lastBracketIndex = serverPart.lastIndexOf(']');
+        
+        if (serverPart.startsWith('[') && serverPart.includes(']')) {
+            const bracketEndIndex = serverPart.lastIndexOf(']');
+            const host = serverPart.substring(1, bracketEndIndex);
+            if (lastColonIndex > bracketEndIndex) {
+                 return { host, port: serverPart.substring(lastColonIndex + 1) };
+            }
+            return { host, port: '' };
+        }
 
-        let host = '';
-        let port = '';
-
-        if (serverPart.startsWith('[') && lastBracketIndex > 0 && lastColonIndex > lastBracketIndex) {
-            host = serverPart.substring(1, lastBracketIndex);
-            port = serverPart.substring(lastColonIndex + 1);
-        } else if (lastColonIndex !== -1) {
-            host = serverPart.substring(0, lastColonIndex);
-            port = serverPart.substring(lastColonIndex + 1);
-        } else {
-            host = serverPart;
+        if (lastColonIndex !== -1) {
+            const potentialHost = serverPart.substring(0, lastColonIndex);
+            const potentialPort = serverPart.substring(lastColonIndex + 1);
+            if (potentialHost.includes(':')) { // 处理无端口的 IPv6
+                return { host: serverPart, port: '' };
+            }
+            return { host: potentialHost, port: potentialPort };
         }
         
-        return { host, port };
+        if (serverPart) {
+            return { host: serverPart, port: '' };
+        }
+
+        throw new Error('自定义解析失败');
 
     } catch (e) {
         console.error("提取主机和端口失败:", url, e);
-        return { host: '', port: '' };
+        return { host: '解析失败', port: 'N/A' };
     }
 }

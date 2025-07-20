@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import Modal from './Modal.vue';
 import { fetchSettings, saveSettings } from '../lib/api.js';
 import { useToastStore } from '../stores/toast.js';
@@ -15,6 +15,26 @@ const isLoading = ref(false);
 const isSaving = ref(false);
 const settings = ref({});
 
+const hasWhitespace = computed(() => {
+  const fieldsToCkeck = [
+    'FileName',
+    'mytoken',
+    'profileToken',
+    'subConverter',
+    'subConfig',
+    'BotToken',
+    'ChatID',
+  ];
+
+  for (const key of fieldsToCkeck) {
+    const value = settings.value[key];
+    if (value && /\s/.test(value)) {
+      return true;
+    }
+  }
+  return false;
+});    
+
 const loadSettings = async () => {
   isLoading.value = true;
   try {
@@ -27,6 +47,11 @@ const loadSettings = async () => {
 };
 
 const handleSave = async () => {
+  if (hasWhitespace.value) {
+    showToast('输入项中不能包含空格，请检查后再试。', 'error');
+    return;
+  }
+  
   isSaving.value = true;
   try {
     const result = await saveSettings(settings.value);
@@ -38,11 +63,6 @@ const handleSave = async () => {
       setTimeout(() => {
         window.location.reload();
       }, 1500); // 延迟1.5秒
-
-      // 页面即将刷新，无需再手动关闭模态框或重置保存状态
-      // emit('update:show', false); 
-      // isSaving.value = false;
-
     } else {
       throw new Error(result.message || '保存失败');
     }
@@ -61,7 +81,14 @@ watch(() => props.show, (newValue) => {
 </script>
 
 <template>
-  <Modal :show="show" @update:show="emit('update:show', $event)" @confirm="handleSave" :is-saving="isSaving">
+  <Modal 
+    :show="show" 
+    @update:show="emit('update:show', $event)" 
+    @confirm="handleSave" 
+    :is-saving="isSaving"
+    :confirm-disabled="hasWhitespace" 
+    confirm-button-title="输入内容包含空格，无法保存"
+  >
     <template #title><h3 class="text-lg font-bold text-gray-800 dark:text-white">设置</h3></template>
     <template #body>
       <div v-if="isLoading" class="text-center p-8">
@@ -89,7 +116,7 @@ watch(() => props.show, (newValue) => {
             class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm dark:text-white"
             placeholder="用于生成订阅组链接专用Token"
           >
-          <p class="text-xs text-gray-400 mt-1">此Token专门用于生成订阅组链接，增強安全性。</p>
+          <p class="text-xs text-gray-400 mt-1">此Token专门用于生成订阅组链接，增强安全性。</p>
         </div>
         <div>
           <label for="subConverter" class="block text-sm font-medium text-gray-700 dark:text-gray-300">SubConverter后端地址</label>
@@ -120,7 +147,7 @@ watch(() => props.show, (newValue) => {
           >
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">节点名称前缀</label>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">节点名前缀</label>
           <div class="mt-2 flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
             <p class="text-sm text-gray-600 dark:text-gray-300">自动将订阅名添加为节点名的前缀</p>
             <label class="relative inline-flex items-center cursor-pointer">

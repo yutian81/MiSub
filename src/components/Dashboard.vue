@@ -46,6 +46,8 @@ const {
   addNodesFromBulk, autoSortNodes, deduplicateNodes,
 } = useManualNodes(initialNodes, markDirty);
 
+const manualNodesPerPage = 24;
+
 // --- 訂閱組 (Profile) 相關狀態 ---
 const profiles = ref([]);
 const config = ref({});
@@ -515,9 +517,10 @@ const formattedTotalRemainingTraffic = computed(() => formatBytes(totalRemaining
 
             <div v-if="manualNodeViewMode === 'list'" class="space-y-2">
                 <ManualNodeList
-                    v-for="node in paginatedManualNodes"
+                    v-for="(node, index) in paginatedManualNodes"
                     :key="node.id"
                     :node="node"
+                    :index="(manualNodesCurrentPage - 1) * manualNodesPerPage + index + 1"
                     @edit="handleEditNode(node.id)"
                     @delete="handleDeleteNodeWithCleanup(node.id)"
                 />
