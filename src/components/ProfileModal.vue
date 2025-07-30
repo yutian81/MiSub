@@ -122,14 +122,37 @@ const filteredManualNodes = computed(() => {
 
 watch(() => props.profile, (newProfile) => {
   if (newProfile) {
-    localProfile.value = JSON.parse(JSON.stringify(newProfile));
+    const profileCopy = JSON.parse(JSON.stringify(newProfile));
+    // Format date for input[type=date]
+    if (profileCopy.expiresAt) {
+      try {
+        profileCopy.expiresAt = new Date(profileCopy.expiresAt).toISOString().split('T')[0];
+      } catch (e) {
+        console.error("Error parsing expiresAt date:", e);
+        profileCopy.expiresAt = '';
+      }
+    }
+    localProfile.value = profileCopy;
   } else {
-    localProfile.value = { name: '', enabled: true, subscriptions: [], manualNodes: [], customId: '' };
+    localProfile.value = { name: '', enabled: true, subscriptions: [], manualNodes: [], customId: '', expiresAt: '' };
   }
 }, { deep: true, immediate: true });
 
 const handleConfirm = () => {
-  emit('save', localProfile.value);
+  const profileToSave = JSON.parse(JSON.stringify(localProfile.value));
+  if (profileToSave.expiresAt) {
+    try {
+      // Set time to the end of the selected day in local time, then convert to ISO string
+      const date = new Date(profileToSave.expiresAt);
+      date.setHours(23, 59, 59, 999);
+      profileToSave.expiresAt = date.toISOString();
+    } catch (e) {
+      console.error("Error processing expiresAt date:", e);
+      // Decide how to handle error: save as is, or clear it
+      profileToSave.expiresAt = ''; 
+    }
+  }
+  emit('save', profileToSave);
 };
 
 const toggleSelection = (listName, id) => {

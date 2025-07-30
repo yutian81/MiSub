@@ -155,16 +155,38 @@ const handleSave = async () => {
       ...subscriptions.value.map(sub => ({ ...sub, isUpdating: undefined })),
       ...manualNodes.value.map(node => ({ ...node, isUpdating: undefined }))
   ];
+
   try {
+    // 数据验证
+    if (!Array.isArray(combinedMisubs) || !Array.isArray(profiles.value)) {
+      throw new Error('数据格式错误，请刷新页面后重试');
+    }
+
     const result = await saveMisubs(combinedMisubs, profiles.value);
+
     if (result.success) {
         saveState.value = 'success';
+        showToast('保存成功！', 'success');
         setTimeout(() => { dirty.value = false; saveState.value = 'idle'; }, 1500);
     } else {
-        throw new Error(result.message || '保存失败');
+        // 显示服务器返回的具体错误信息
+        const errorMessage = result.message || result.error || '保存失败，请稍后重试';
+        throw new Error(errorMessage);
     }
   } catch (error) {
-    showToast(error.message, 'error');
+    console.error('保存数据时发生错误:', error);
+
+    // 根据错误类型提供不同的用户提示
+    let userMessage = error.message;
+    if (error.message.includes('网络')) {
+      userMessage = '网络连接异常，请检查网络后重试';
+    } else if (error.message.includes('格式')) {
+      userMessage = '数据格式异常，请刷新页面后重试';
+    } else if (error.message.includes('存储')) {
+      userMessage = '存储服务暂时不可用，请稍后重试';
+    }
+
+    showToast(userMessage, 'error');
     saveState.value = 'idle';
   }
 };

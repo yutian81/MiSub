@@ -1,6 +1,6 @@
 // FILE: src/composables/useSubscriptions.js
 import { ref, computed, watch } from 'vue';
-import { fetchNodeCount } from '../lib/api.js';
+import { fetchNodeCount, batchUpdateNodes } from '../lib/api.js';
 import { useToastStore } from '../stores/toast.js';
 
 export function useSubscriptions(initialSubsRef, markDirty) {
@@ -106,15 +106,55 @@ export function useSubscriptions(initialSubsRef, markDirty) {
     markDirty();
   }
   
-  // [修正] 批量導入後也逐個更新，防止併發問題
+  // {{ AURA-X: Modify - 使用批量更新API优化批量导入. Approval: 寸止(ID:1735459200). }}
+  // [优化] 批量導入使用批量更新API，减少KV写入次数
   async function addSubscriptionsFromBulk(subs) {
     subscriptions.value.unshift(...subs);
     markDirty();
-    showToast('正在後台逐一更新導入的訂閱...', 'success');
-    for(const sub of subs) {
-        await handleUpdateNodeCount(sub.id);
+
+    // 过滤出需要更新的订阅（只有http/https链接）
+    const subsToUpdate = subs.filter(sub => sub.url && sub.url.startsWith('http'));
+
+    if (subsToUpdate.length > 0) {
+      showToast(`正在批量更新 ${subsToUpdate.length} 个订阅...`, 'success');
+
+      try {
+        const result = await batchUpdateNodes(subsToUpdate.map(sub => sub.id));
+
+        if (result.success) {
+          // 更新本地数据
+          result.results.forEach(updateResult => {
+            if (updateResult.success) {
+              const sub = subscriptions.value.find(s => s.id === updateResult.id);
+              if (sub) {
+                sub.nodeCount = updateResult.nodeCount;
+                // userInfo会在下次数据同步时更新
+              }
+            }
+          });
+
+          const successCount = result.results.filter(r => r.success).length;
+          showToast(`批量更新完成！成功更新 ${successCount}/${subsToUpdate.length} 个订阅`, 'success');
+          markDirty(); // 标记需要保存
+        } else {
+          showToast(`批量更新失败: ${result.message}`, 'error');
+          // 降级到逐个更新
+          showToast('正在降级到逐个更新模式...', 'info');
+          for(const sub of subsToUpdate) {
+            await handleUpdateNodeCount(sub.id);
+          }
+        }
+      } catch (error) {
+        console.error('Batch update failed:', error);
+        showToast('批量更新失败，正在降级到逐个更新...', 'error');
+        // 降级到逐个更新
+        for(const sub of subsToUpdate) {
+          await handleUpdateNodeCount(sub.id);
+        }
+      }
+    } else {
+      showToast('批量导入完成！', 'success');
     }
-    showToast('批量導入的訂閱已全部更新完畢!', 'success');
   }
 
   watch(initialSubsRef, (newInitialSubs) => {
