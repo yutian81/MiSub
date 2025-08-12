@@ -1,4 +1,5 @@
 import yaml from 'js-yaml';
+import { StorageFactory, DataMigrator, STORAGE_TYPES } from './storage-adapter.js';
 
 const OLD_KV_KEY = 'misub_data_v1';
 const KV_KEY_SUBS = 'misub_subscriptions_v1';
@@ -149,7 +150,17 @@ class BatchWriteManager {
 // 全局批量写入管理器实例
 const batchWriteManager = new BatchWriteManager();
 
-// --- [新] 默认设置中增加通知阈值 ---
+/**
+ * 获取存储适配器实例
+ * @param {Object} env - Cloudflare 环境对象
+ * @returns {Promise<Object>} 存储适配器实例
+ */
+async function getStorageAdapter(env) {
+    const storageType = await StorageFactory.getStorageType(env);
+    return StorageFactory.createAdapter(env, storageType);
+}
+
+// --- [新] 默认设置中增加通知阈值和存储类型 ---
 const defaultSettings = {
   FileName: 'MiSub',
   mytoken: 'auto',
@@ -157,8 +168,9 @@ const defaultSettings = {
   subConverter: 'subapi.dayutian.com', //'url.v1.mk',
   subConfig: 'https://raw.githubusercontent.com/yutian81/edgetunnel-cmliu/main/clash-config/mini_country_balance_eu.ini',
   prependSubName: true,
-  NotifyThresholdDays: 3, 
-  NotifyThresholdPercent: 90 
+  NotifyThresholdDays: 3,
+  NotifyThresholdPercent: 90,
+  storageType: 'kv' // 新增：数据存储类型，默认 KV，可选 'd1'
 };
 
 const formatBytes = (bytes, decimals = 2) => {
@@ -212,9 +224,10 @@ async function sendTgNotification(settings, message) {
 
 async function handleCronTrigger(env) {
     console.log("Cron trigger fired. Checking all subscriptions for traffic and node count...");
-    const originalSubs = await env.MISUB_KV.get(KV_KEY_SUBS, 'json') || [];
+    const storageAdapter = await getStorageAdapter(env);
+    const originalSubs = await storageAdapter.get(KV_KEY_SUBS) || [];
     const allSubs = JSON.parse(JSON.stringify(originalSubs)); // 深拷贝以便比较
-    const settings = await env.MISUB_KV.get(KV_KEY_SETTINGS, 'json') || defaultSettings;
+    const settings = await storageAdapter.get(KV_KEY_SETTINGS) || defaultSettings;
 
     const nodeRegex = /^(ss|ssr|vmess|vless|trojan|hysteria2?|hy|hy2|tuic|anytls|socks5):\/\//gm;
 
@@ -278,7 +291,7 @@ async function handleCronTrigger(env) {
     }
 
     if (changesMade) {
-        await env.MISUB_KV.put(KV_KEY_SUBS, JSON.stringify(allSubs));
+        await storageAdapter.put(KV_KEY_SUBS, allSubs);
         console.log("Subscriptions updated with new traffic info and node counts.");
     } else {
         console.log("Cron job finished. No changes detected.");
@@ -374,6 +387,45 @@ async function checkAndNotify(sub, settings, env) {
 async function handleApiRequest(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/api/, '');
+    // [新增] 数据存储迁移接口 (KV -> D1)
+    if (path === '/migrate_to_d1') {
+        if (!await authMiddleware(request, env)) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+        }
+        try {
+            if (!env.MISUB_DB) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    message: 'D1 数据库未配置，请检查 wrangler.toml 配置'
+                }), { status: 400 });
+            }
+
+            const migrationResult = await DataMigrator.migrateKVToD1(env);
+
+            if (migrationResult.errors.length > 0) {
+                return new Response(JSON.stringify({
+                    success: false,
+                    message: '迁移过程中出现错误',
+                    details: migrationResult.errors,
+                    partialSuccess: migrationResult
+                }), { status: 500 });
+            }
+
+            return new Response(JSON.stringify({
+                success: true,
+                message: '数据已成功迁移到 D1 数据库',
+                details: migrationResult
+            }), { status: 200 });
+
+        } catch (error) {
+            console.error('[API Error /migrate_to_d1]', error);
+            return new Response(JSON.stringify({
+                success: false,
+                message: `迁移失败: ${error.message}`
+            }), { status: 500 });
+        }
+    }
+
     // [新增] 安全的、可重复执行的迁移接口
     if (path === '/migrate') {
         if (!await authMiddleware(request, env)) { return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }); }
@@ -429,19 +481,20 @@ async function handleApiRequest(request, env) {
         
         case '/data': {
             try {
+                const storageAdapter = await getStorageAdapter(env);
                 const [misubs, profiles, settings] = await Promise.all([
-                    env.MISUB_KV.get(KV_KEY_SUBS, 'json').then(res => res || []),
-                    env.MISUB_KV.get(KV_KEY_PROFILES, 'json').then(res => res || []),
-                    env.MISUB_KV.get(KV_KEY_SETTINGS, 'json').then(res => res || {})
+                    storageAdapter.get(KV_KEY_SUBS).then(res => res || []),
+                    storageAdapter.get(KV_KEY_PROFILES).then(res => res || []),
+                    storageAdapter.get(KV_KEY_SETTINGS).then(res => res || {})
                 ]);
-                const config = { 
-                    FileName: settings.FileName || 'MISUB', 
+                const config = {
+                    FileName: settings.FileName || 'MISUB',
                     mytoken: settings.mytoken || 'auto',
                     profileToken: settings.profileToken || 'profiles'
                 };
                 return new Response(JSON.stringify({ misubs, profiles, config }), { headers: { 'Content-Type': 'application/json' } });
             } catch(e) {
-                console.error('[API Error /data]', 'Failed to read from KV:', e);
+                console.error('[API Error /data]', 'Failed to read from storage:', e);
                 return new Response(JSON.stringify({ error: '读取初始数据失败' }), { status: 500 });
             }
         }
@@ -481,7 +534,8 @@ async function handleApiRequest(request, env) {
                 // 步骤4: 获取设置（带错误处理）
                 let settings;
                 try {
-                    settings = await env.MISUB_KV.get(KV_KEY_SETTINGS, 'json') || defaultSettings;
+                    const storageAdapter = await getStorageAdapter(env);
+                    settings = await storageAdapter.get(KV_KEY_SETTINGS) || defaultSettings;
                 } catch (settingsError) {
                     console.error('[API Error /misubs] 获取设置失败:', settingsError);
                     settings = defaultSettings; // 使用默认设置继续
@@ -505,18 +559,19 @@ async function handleApiRequest(request, env) {
                     // 继续保存流程
                 }
 
-                // {{ AURA-X: Modify - 使用条件写入优化数据保存. Approval: 寸止(ID:1735459200). }}
-                // 步骤6: 保存数据到KV存储（使用条件写入）
+                // {{ AURA-X: Modify - 使用存储适配器保存数据. Approval: 寸止(ID:1735459200). }}
+                // 步骤6: 保存数据到存储（使用存储适配器）
                 try {
+                    const storageAdapter = await getStorageAdapter(env);
                     await Promise.all([
-                    env.MISUB_KV.put(KV_KEY_SUBS, JSON.stringify(misubs)),
-                    env.MISUB_KV.put(KV_KEY_PROFILES, JSON.stringify(profiles))
-                ]);
-                } catch (kvError) {
-                    console.error('[API Error /misubs] KV存储写入失败:', kvError);
+                        storageAdapter.put(KV_KEY_SUBS, misubs),
+                        storageAdapter.put(KV_KEY_PROFILES, profiles)
+                    ]);
+                } catch (storageError) {
+                    console.error('[API Error /misubs] 存储写入失败:', storageError);
                     return new Response(JSON.stringify({
                         success: false,
-                        message: `数据保存失败: ${kvError.message || '存储服务暂时不可用，请稍后重试'}`
+                        message: `数据保存失败: ${storageError.message || '存储服务暂时不可用，请稍后重试'}`
                     }), { status: 500 });
                 }
 
@@ -591,10 +646,11 @@ async function handleApiRequest(request, env) {
                         console.error(`Node count request for ${subUrl} rejected:`, responses[1].reason);
                     }
                     
-                    // {{ AURA-X: Modify - 使用条件写入优化节点计数更新. Approval: 寸止(ID:1735459200). }}
+                    // {{ AURA-X: Modify - 使用存储适配器优化节点计数更新. Approval: 寸止(ID:1735459200). }}
                     // 只有在至少获取到一个有效信息时，才更新数据库
                     if (result.userInfo || result.count > 0) {
-                        const originalSubs = await env.MISUB_KV.get(KV_KEY_SUBS, 'json') || [];
+                        const storageAdapter = await getStorageAdapter(env);
+                        const originalSubs = await storageAdapter.get(KV_KEY_SUBS) || [];
                         const allSubs = JSON.parse(JSON.stringify(originalSubs)); // 深拷贝
                         const subToUpdate = allSubs.find(s => s.url === subUrl);
 
@@ -602,7 +658,7 @@ async function handleApiRequest(request, env) {
                             subToUpdate.nodeCount = result.count;
                             subToUpdate.userInfo = result.userInfo;
 
-                            await env.MISUB_KV.put(KV_KEY_SUBS, JSON.stringify(allSubs));
+                            await storageAdapter.put(KV_KEY_SUBS, allSubs);
                         }
                     }
                     
@@ -653,7 +709,8 @@ async function handleApiRequest(request, env) {
                     return new Response(JSON.stringify({ error: 'subscriptionIds must be an array' }), { status: 400 });
                 }
 
-                const allSubs = await env.MISUB_KV.get(KV_KEY_SUBS, 'json') || [];
+                const storageAdapter = await getStorageAdapter(env);
+                const allSubs = await storageAdapter.get(KV_KEY_SUBS) || [];
                 const subsToUpdate = allSubs.filter(sub => subscriptionIds.includes(sub.id) && sub.url.startsWith('http'));
 
                 console.log(`[Batch Update] Starting batch update for ${subsToUpdate.length} subscriptions`);
@@ -710,8 +767,8 @@ async function handleApiRequest(request, env) {
                     result.status === 'fulfilled' ? result.value : { success: false, error: 'Promise rejected' }
                 );
 
-                // 使用批量写入管理器保存更新后的数据
-                await batchWriteManager.queueWrite(env, KV_KEY_SUBS, allSubs);
+                // 使用存储适配器保存更新后的数据
+                await storageAdapter.put(KV_KEY_SUBS, allSubs);
 
                 console.log(`[Batch Update] Completed batch update, ${updateResults.filter(r => r.success).length} successful`);
 
@@ -733,28 +790,30 @@ async function handleApiRequest(request, env) {
         case '/settings': {
             if (request.method === 'GET') {
                 try {
-                    const settings = await env.MISUB_KV.get(KV_KEY_SETTINGS, 'json') || {};
+                    const storageAdapter = await getStorageAdapter(env);
+                    const settings = await storageAdapter.get(KV_KEY_SETTINGS) || {};
                     return new Response(JSON.stringify({ ...defaultSettings, ...settings }), { headers: { 'Content-Type': 'application/json' } });
                 } catch (e) {
-                    console.error('[API Error /settings GET]', 'Failed to read settings from KV:', e);
+                    console.error('[API Error /settings GET]', 'Failed to read settings:', e);
                     return new Response(JSON.stringify({ error: '读取设置失败' }), { status: 500 });
                 }
             }
             if (request.method === 'POST') {
                 try {
                     const newSettings = await request.json();
-                    const oldSettings = await env.MISUB_KV.get(KV_KEY_SETTINGS, 'json') || {};
+                    const storageAdapter = await getStorageAdapter(env);
+                    const oldSettings = await storageAdapter.get(KV_KEY_SETTINGS) || {};
                     const finalSettings = { ...oldSettings, ...newSettings };
 
-                    // {{ AURA-X: Modify - 使用条件写入优化设置保存. Approval: 寸止(ID:1735459200). }}
-                    await env.MISUB_KV.put(KV_KEY_SETTINGS, JSON.stringify(finalSettings));
-                    
+                    // 使用存储适配器保存设置
+                    await storageAdapter.put(KV_KEY_SETTINGS, finalSettings);
+
                     const message = `⚙️ *MiSub 设置更新* ⚙️\n\n您的 MiSub 应用设置已成功更新。`;
                     await sendTgNotification(finalSettings, message);
 
                     return new Response(JSON.stringify({ success: true, message: '设置已保存' }));
                 } catch (e) {
-                    console.error('[API Error /settings POST]', 'Failed to parse request or write settings to KV:', e);
+                    console.error('[API Error /settings POST]', 'Failed to parse request or write settings:', e);
                     return new Response(JSON.stringify({ error: '保存设置失败' }), { status: 500 });
                 }
             }
@@ -948,10 +1007,11 @@ async function handleMisubRequest(context) {
     const url = new URL(request.url);
     const userAgentHeader = request.headers.get('User-Agent') || "Unknown";
 
+    const storageAdapter = await getStorageAdapter(env);
     const [settingsData, misubsData, profilesData] = await Promise.all([
-        env.MISUB_KV.get(KV_KEY_SETTINGS, 'json'),
-        env.MISUB_KV.get(KV_KEY_SUBS, 'json'),
-        env.MISUB_KV.get(KV_KEY_PROFILES, 'json')
+        storageAdapter.get(KV_KEY_SETTINGS),
+        storageAdapter.get(KV_KEY_SUBS),
+        storageAdapter.get(KV_KEY_PROFILES)
     ]);
     const settings = settingsData || {};
     const allMisubs = misubsData || [];

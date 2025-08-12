@@ -149,3 +149,28 @@ export async function batchUpdateNodes(subscriptionIds) {
         return { success: false, message: '网络请求失败，请检查网络连接' };
     }
 }
+
+/**
+ * 数据迁移：从 KV 迁移到 D1 数据库
+ * @returns {Promise<Object>} - 迁移结果
+ */
+export async function migrateToD1() {
+    try {
+        const response = await fetch('/api/migrate_to_d1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.message || errorData.error || `服务器错误 (${response.status})`;
+            return { success: false, message: errorMessage };
+        }
+
+        const result = await response.json();
+        return result;
+    } catch (error) {
+        console.error("Failed to migrate to D1:", error);
+        return { success: false, message: '网络请求失败，请检查网络连接' };
+    }
+}

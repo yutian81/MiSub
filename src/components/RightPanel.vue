@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue';
 import { useToastStore } from '../stores/toast.js';
+import { useUIStore } from '../stores/ui.js';
 
 const props = defineProps({
   config: Object,
@@ -8,34 +9,37 @@ const props = defineProps({
 });
 
 const { showToast } = useToastStore();
+const uiStore = useUIStore();
 
 const copied = ref(false);
 let copyTimeout = null;
 
-const formats = ['自适应', 'Base64', 'Clash', 'Sing-Box', 'Surge', 'Loon'];
-const selectedFormat = ref('自适应');
+const formats = ['通用格式', 'Base64', 'Clash', 'Sing-Box', 'Surge', 'Loon'];
+const selectedFormat = ref('通用格式');
 const selectedId = ref('default'); 
 
+const requiredToken = computed(() => {
+  return selectedId.value === 'default' 
+    ? { type: 'mytoken', value: props.config?.mytoken, name: '主 Token' }
+    : { type: 'profileToken', value: props.config?.profileToken, name: '分享 Token' };
+});
+
+const isLinkValid = computed(() => {
+  return requiredToken.value.value && requiredToken.value.value !== 'auto';
+});
+
 const subLink = computed(() => {
-  const origin = window.location.origin;
-  let token = '';
-  let baseUrl = '';
-
-  // --- [修改] ---
-  if (selectedId.value === 'default') {
-    // 選擇“默認訂閱”，使用主 Token
-    token = props.config?.mytoken;
-    if (!token) return '主Token未在设置中配置';
-    baseUrl = `${origin}/${token}`;
-  } else {
-    // 選擇“訂閱組”，使用分享 Token
-    token = props.config?.profileToken;
-    if (!token) return '分享Token未在设置中配置';
-    baseUrl = `${origin}/${token}/${selectedId.value}`;
+  if (!isLinkValid.value) {
+    return `请先在“设置”中配置固定的 ${requiredToken.value.name}`;
   }
-  // ---
+  
+  const origin = window.location.origin;
+  const token = requiredToken.value.value;
+  let baseUrl = selectedId.value === 'default'
+    ? `${origin}/${token}`
+    : `${origin}/${token}/${selectedId.value}`;
 
-  if (selectedFormat.value === '自适应') {
+  if (selectedFormat.value === '通用格式') {
     return baseUrl;
   }
   
@@ -45,8 +49,8 @@ const subLink = computed(() => {
 });
 
 const copyToClipboard = () => {
-    if (!subLink.value || subLink.value.includes('未在设置中配置')) {
-        showToast('链接无效，无法复制', 'error');
+    if (!isLinkValid.value) {
+        showToast('链接无效，请先完成配置', 'error');
         return;
     }
     navigator.clipboard.writeText(subLink.value);
@@ -100,9 +104,15 @@ onUnmounted(() => {
           type="text"
           :value="subLink"
           readonly
-          class="w-full text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800/50 rounded-lg pl-3 pr-10 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+          :disabled="!isLinkValid"
+          class="w-full text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800/50 rounded-lg pl-3 pr-10 py-2.5 focus:outline-none focus:ring-2 font-mono"
+          :class="{
+            'focus:ring-indigo-500': isLinkValid,
+            'focus:ring-red-500 cursor-not-allowed': !isLinkValid,
+            'text-red-500 dark:text-red-500': !isLinkValid
+          }"
         />
-        <button @click="copyToClipboard" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-indigo-500 transition-colors duration-200" :title="copied ? '已复制' : '复制'">
+        <button @click="copyToClipboard" :disabled="!isLinkValid" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 transition-colors duration-200" :class="isLinkValid ? 'hover:text-indigo-500' : 'cursor-not-allowed'">
             <Transition name="fade" mode="out-in">
                 <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -114,8 +124,15 @@ onUnmounted(() => {
         </button>
       </div>
 
-       <p v-if="config?.mytoken === 'auto'" class="text-xs text-yellow-600 dark:text-yellow-500 mt-2">
-           提示：当前为自动Token，链接可能会变化。为确保链接稳定，推荐在 "设置" 中配置一个固定Token。
+       <p v-if="!isLinkValid || requiredToken.value.value === 'auto'" class="text-xs text-yellow-600 dark:text-yellow-500 mt-2">
+           提示：
+           <span v-if="!isLinkValid">请在 
+             <button @click="uiStore.isSettingsModalVisible = true" class="font-bold underline hover:text-yellow-400">设置</button> 
+             中配置一个固定的 {{ requiredToken.name }}。
+           </span>
+           <span v-else-if="requiredToken.type === 'mytoken' && requiredToken.value === 'auto'">
+             当前为自动Token，链接可能会变化。为确保链接稳定，推荐在 "设置" 中配置一个固定Token。
+           </span>
        </p>
     </div>
   </div>

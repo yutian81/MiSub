@@ -14,7 +14,7 @@ const emit = defineEmits(['delete', 'change', 'edit', 'copy-link']);
 
 <template>
   <div
-    class="group bg-white dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-lg dark:shadow-2xl ring-1 ring-black/5 p-4 transition-all duration-300 hover:-translate-y-0.5 flex flex-col"
+    class="group bg-white dark:bg-gray-900/60 backdrop-blur-sm rounded-2xl shadow-lg dark:shadow-2xl ring-1 ring-black/5 p-4 transition-all duration-300 hover:-translate-y-0.5 flex flex-col justify-between"
     :class="{ 'opacity-50': !profile.enabled }"
   >
     <div class="flex items-start justify-between gap-3">
@@ -36,8 +36,6 @@ const emit = defineEmits(['delete', 'change', 'edit', 'copy-link']);
           </button>
       </div>
     </div>
-
-    <div class="flex-grow"></div>
 
     <div class="flex justify-between items-center mt-3">
       <label class="relative inline-flex items-center cursor-pointer">

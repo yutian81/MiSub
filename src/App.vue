@@ -6,6 +6,7 @@ import { useToastStore } from './stores/toast';
 import { storeToRefs } from 'pinia';
 
 import Dashboard from './components/Dashboard.vue';
+import DashboardSkeleton from './components/DashboardSkeleton.vue';
 import Login from './components/Login.vue';
 import Header from './components/Header.vue';
 import Toast from './components/Toast.vue';
@@ -37,17 +38,13 @@ onMounted(() => {
 
     <main 
       class="flex-grow"
-      :class="{ 
-        'flex items-center justify-center': sessionState !== 'loggedIn',
-        'overflow-y-auto': sessionState === 'loggedIn' 
+      :class="{
+        'flex items-center justify-center': sessionState !== 'loggedIn' && sessionState !== 'loading',
+        'overflow-y-auto': sessionState === 'loggedIn' || sessionState === 'loading'
       }"
     >
-      <div v-if="sessionState === 'loading'" class="text-center">
-        <p class="text-gray-500">正在加载...</p>
-      </div>
-      
+      <DashboardSkeleton v-if="sessionState === 'loading'" />
       <Dashboard v-else-if="sessionState === 'loggedIn' && initialData" :data="initialData" />
-      
       <Login v-else :login="login" />
     </main>
     
